@@ -6,6 +6,7 @@ MOODS = {
     "Neutral": {"emoji": "😐", "bg": "#14202b", "accent": "#74C0FC", "msg": "Steady and calm. Good time for focused work."},
     "Tired":   {"emoji": "😴", "bg": "#1f1a2e", "accent": "#B197FC", "msg": "You look tired. Consider a 5-minute break."},
     "No face": {"emoji": "🔍", "bg": "#1a1a1a", "accent": "#868E96", "msg": "No face found. Face the camera in good light."},
+    "Surprised": {"emoji": "😲", "bg": "#FF6B6B", "accent": "#FFD43B", "msg": "Wow! That's unexpected!"}
 }
 
 

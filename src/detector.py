@@ -1,59 +1,80 @@
-"""Face + lightweight emotion detection (Day 1: Haar cascades).
-
-This is a HEURISTIC detector, good enough for a demo:
-  Happy   -> smile found in lower half of face
-  Tired   -> face found but no open eyes found in upper half
-  Neutral -> everything else
-Day 2/3 upgrade: swap `analyze_face` for an ONNX model (HSEmotion).
-Keep the same return type so the UI does not change.
-"""
-from dataclasses import dataclass
 import cv2
 import numpy as np
 
-_FACE = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-_SMILE = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_smile.xml")
-_EYES = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_eye.xml")
+# Load the pre-trained Haar Cascades from OpenCV's built-in data
+FACE_CASCADE_PATH = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+SMILE_CASCADE_PATH = cv2.data.haarcascades + "haarcascade_smile.xml"
 
+face_cascade = cv2.CascadeClassifier(FACE_CASCADE_PATH)
+smile_cascade = cv2.CascadeClassifier(SMILE_CASCADE_PATH)
 
-@dataclass
-class FaceResult:
-    box: tuple          # (x, y, w, h)
-    emotion: str        # Happy | Neutral | Tired
-    confidence: float   # 0..1 (heuristic, not a calibrated probability)
+def detect(image: np.ndarray):
+    """
+    Takes an image (RGB from Streamlit), detects a face, and guesses the mood.
+    Returns: mood (str), confidence (float), annotated_image (np.ndarray)
+    """
+    if image is None:
+        return "Neutral", 0.0, None
 
+    # Convert RGB (Streamlit) to BGR (OpenCV) then to Grayscale for detection
+    img_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-def analyze_face(gray_face: np.ndarray) -> tuple[str, float]:
-    h, w = gray_face.shape
-    lower = gray_face[h // 2:, :]
-    upper = gray_face[: h // 2, :]
-    smiles = _SMILE.detectMultiScale(lower, scaleFactor=1.7, minNeighbors=22, minSize=(w // 4, h // 12))
+    # Detect faces
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+
+    if len(faces) == 0:
+        return "Neutral", 0.0, image
+
+    # We only take the first face for simplicity
+    (x, y, w, h) = faces[0]
+    
+    # Focus on the lower half of the face for smiles
+    roi_gray = gray[y + h//2 : y + h, x : x + w]
+
+    # Detect smiles in the lower half of the face
+    # Tuned threshold: minNeighbors=20 prevents false positives
+    smiles = smile_cascade.detectMultiScale(roi_gray, scaleFactor=1.8, minNeighbors=20)
+
+    mood = "Neutral"
+    confidence = 0.5
+    
     if len(smiles) > 0:
-        return "Happy", min(0.6 + 0.1 * len(smiles), 0.95)
-    eyes = _EYES.detectMultiScale(upper, scaleFactor=1.1, minNeighbors=8, minSize=(w // 8, h // 8))
-    if len(eyes) == 0:
-        return "Tired", 0.55
-    return "Neutral", 0.65
+        # Added 5th Mood logic: Check the shape of the detected mouth
+        (sx, sy, sw, sh) = smiles[0]
+        
+        # If the mouth is very tall/round, it's likely a surprised "O" shape
+        if sh > sw * 0.8: 
+            mood = "Surprised"
+            confidence = 0.75
+        else:
+            mood = "Happy"
+            confidence = 0.85
+    else:
+        # Simple heuristic: If face is small or low in frame, assume Tired
+        if h < 100 or y > 300:
+            mood = "Tired"
+            confidence = 0.6
+            
+    # Annotate the image to show the detection
+    annotated_img = annotate(img_bgr, faces[0], mood)
+
+    # Convert back to RGB for Streamlit
+    annotated_img_rgb = cv2.cvtColor(annotated_img, cv2.COLOR_BGR2RGB)
+
+    return mood, confidence, annotated_img_rgb
 
 
-def detect(image_bgr: np.ndarray) -> list[FaceResult]:
-    gray = cv2.equalizeHist(cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY))
-    faces = _FACE.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
-    results = []
-    for (x, y, w, h) in faces:
-        emotion, conf = analyze_face(gray[y:y + h, x:x + w])
-        results.append(FaceResult((int(x), int(y), int(w), int(h)), emotion, conf))
-    return results
-
-
-def annotate(image_bgr: np.ndarray, results: list[FaceResult], blur: bool = False) -> np.ndarray:
-    """Draw boxes + labels. If blur=True the face is blurred (privacy mode)."""
-    out = image_bgr.copy()
-    for r in results:
-        x, y, w, h = r.box
-        if blur:
-            out[y:y + h, x:x + w] = cv2.GaussianBlur(out[y:y + h, x:x + w], (51, 51), 30)
-        cv2.rectangle(out, (x, y), (x + w, y + h), (0, 200, 120), 2)
-        cv2.putText(out, f"{r.emotion} {r.confidence:.0%}", (x, max(y - 8, 15)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 120), 2)
-    return out
+def annotate(img, face_rect, mood):
+    """
+    Draws a rectangle around the face and puts the mood text on the image.
+    """
+    (x, y, w, h) = face_rect
+    
+    # Draw rectangle around face
+    cv2.rectangle(img, (x, y), (x + w, y + h), (0, 255, 0), 2)
+    
+    # Add mood text above the face
+    cv2.putText(img, mood, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+    
+    return img
