@@ -12,7 +12,7 @@ mtcnn
 facenet-pytorch
 tensorflow
 tf-keras
-gtts
+gTTS
 plotly>=5.18.0
 seaborn>=0.13.0
 folium>=0.15.0
